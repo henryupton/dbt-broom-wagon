@@ -6,6 +6,16 @@ dbt's own deferral compares against the last run that succeeded as a whole, so o
 
 It selects nodes and stops there. Your workflow triggers the run.
 
+## What it detects
+
+Change detection is the node body checksum, the same as `state:modified.body`. Edits to a model's SQL or Python body are seen. These are not:
+
+- macro edits
+- config and YAML property changes
+- var or env changes
+
+Run history has blind spots too. Cancelled and in-progress runs are not read, and a run that crashed before writing its artifacts leaves no record, so a node it built looks unbuilt.
+
 ## Install
 
 ```bash
@@ -25,6 +35,11 @@ DBT_CLOUD_API_TOKEN=... broom-wagon select \
 | Option | Default | Meaning |
 |---|---|---|
 | `--source` | required | `dbt-cloud`, or `local` with `--runs-dir` |
+| `--runs-dir` | none | Folder of fake or saved runs, for `--source local` |
+| `--account-id` | none | dbt Cloud account id, for `--source dbt-cloud` |
+| `--job-id` | none | dbt Cloud job whose runs make up the history |
+| `--host` | `cloud.getdbt.com` | dbt Cloud access URL host. A leading `https://` and trailing `/` are dropped |
+| `--api-token` | `$DBT_CLOUD_API_TOKEN` | dbt Cloud service token |
 | `--manifest` | required | Manifest of the commit being deployed, from `dbt parse` |
 | `--max-runs` | `30` | Most runs with build steps to read |
 | `--credit-on` | `model` | `model`: a node's own success counts. `model-and-tests`: its tests must pass too |
@@ -49,9 +64,22 @@ DBT_CLOUD_API_TOKEN=... broom-wagon select \
     account-id: 123
     job-id: 456
     api-token: ${{ secrets.DBT_CLOUD_API_TOKEN }}
-- if: steps.broom-wagon.outputs.count != '0'
-  run: ./trigger-job.sh "dbt build --select ${{ steps.broom-wagon.outputs.select }}"
+- if: steps.broom-wagon.outputs.select != ''
+  env:
+    SELECT: ${{ steps.broom-wagon.outputs.select }}
+  run: ./trigger-job.sh "dbt build --select $SELECT"
 ```
+
+Pass the selection through `env:` and quote the variable. Never put `${{ }}` inside `run:`.
+
+| Input | Default |
+|---|---|
+| `account-id`, `job-id`, `api-token` | required |
+| `host` | `cloud.getdbt.com` |
+| `manifest-path` | `target/manifest.json` |
+| `max-runs` | `30` |
+| `credit-on` | `model` |
+| `include-unrun` | `false` |
 
 Outputs: `select`, `count`, and `json-path` (every selected node with its reason). The Action caches downloaded artifacts between workflow runs.
 
@@ -66,6 +94,9 @@ Outputs: `select`, `count`, and `json-path` (every selected node with its reason
 | `stale_vs:<node>` | a parent built more recently than it did, or an ephemeral parent's code changed |
 | `downstream_of:<node>` | it descends from a selected node |
 
+- A node's newest successful build decides its credit, whatever code it built. Reverting a change rebuilds the node.
+- Failed and skipped builds are looked past, since they leave the table as it was.
+- Under `model-and-tests`, only tests that ran in that build must pass. A new test, or a test the job excludes, does not block its model.
 - Runs are compared by id, so a parent and child built in the same run are up to date.
 - Sources are not parents. Data freshness is out of scope.
 - Ephemeral models never run, so their children look through them to the real parents.
