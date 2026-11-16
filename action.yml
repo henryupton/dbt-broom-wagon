@@ -69,5 +69,5 @@ runs:
           --cache-dir "$RUNNER_TEMP/broom-wagon-cache"
           --format json --out "$out" --github-output)
         if [ "$BW_INCLUDE_UNRUN" = "true" ]; then args+=(--include-unrun); fi
-        uvx --from "$BW_ACTION_PATH" broom-wagon "${args[@]}"
+        uv run --project "$BW_ACTION_PATH" --frozen broom-wagon "${args[@]}"
         echo "json-path=$out" >> "$GITHUB_OUTPUT"
