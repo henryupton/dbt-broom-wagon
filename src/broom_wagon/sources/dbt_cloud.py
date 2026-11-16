@@ -15,7 +15,7 @@ from broom_wagon.artifacts import BroomWagonError, Manifest, RunResults, parse_m
 from broom_wagon.sources import RunRef
 
 FINISHED = frozenset({10, 20})
-BUILD_STEP = re.compile(r"Invoke dbt with `dbt (?:--?\S+ )*(?:build|run|test|seed|snapshot)(?=[\s`])")
+DBT_STEP = re.compile(r"Invoke dbt with `dbt")
 
 T = TypeVar("T")
 
@@ -83,7 +83,7 @@ class DbtCloudSource:
                 return
             offset += self.page_size
 
-    def _build_steps(self, run: RunRef) -> list[int]:
+    def _dbt_steps(self, run: RunRef) -> list[int]:
         if run.id not in self._steps:
             path = f"/runs/{run.id}/"
             data = self._data(self._get(path, {"include_related": '["run_steps"]'}), path)
@@ -91,7 +91,7 @@ class DbtCloudSource:
                 self._steps[run.id] = [
                     step["index"]
                     for step in data.get("run_steps") or []
-                    if step["status"] in FINISHED and BUILD_STEP.search(step["name"])
+                    if step["status"] in FINISHED and DBT_STEP.match(step["name"])
                 ]
             except (KeyError, TypeError, AttributeError) as exc:
                 raise BroomWagonError(f"dbt Cloud returned malformed run steps for {path}") from exc
@@ -120,14 +120,21 @@ class DbtCloudSource:
 
     def run_results(self, run: RunRef) -> list[RunResults]:
         results = []
-        for step in self._build_steps(run):
+        for step in self._dbt_steps(run):
             parsed = self._artifact(run, step, "run_results.json", parse_run_results)
             if parsed is not None and parsed.is_build:
                 results.append(parsed)
         return results
 
     def manifest(self, run: RunRef) -> Manifest | None:
-        for step in self._build_steps(run):
+        steps = self._dbt_steps(run)
+        for step in steps:
+            results = self._artifact(run, step, "run_results.json", parse_run_results)
+            if results is not None and results.is_build:
+                parsed = self._artifact(run, step, "manifest.json", parse_manifest)
+                if parsed is not None:
+                    return parsed
+        for step in steps:
             parsed = self._artifact(run, step, "manifest.json", parse_manifest)
             if parsed is not None:
                 return parsed

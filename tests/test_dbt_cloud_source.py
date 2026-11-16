@@ -32,6 +32,21 @@ DAILY_STEPS = steps(
 )
 
 
+def mock_daily_run_results(run_id=10):
+    """Mock every dbt step of DAILY_STEPS; only step 4 is a build."""
+    url = f"{BASE}/runs/{run_id}/artifacts/run_results.json"
+    respx.get(url, params={"step": "2"}).mock(return_value=httpx.Response(404, text="Not found."))
+    respx.get(url, params={"step": "3"}).mock(return_value=httpx.Response(404, text="Not found."))
+    build = respx.get(url, params={"step": "4"}).mock(
+        return_value=httpx.Response(200, json=run_results({A: "success"}))
+    )
+    respx.get(url, params={"step": "5"}).mock(return_value=httpx.Response(200, json=run_results({}, "compile")))
+    respx.get(url, params={"step": "6"}).mock(
+        return_value=httpx.Response(200, json=run_results({"operation.proj.grant": "success"}, "run-operation"))
+    )
+    return build
+
+
 @respx.mock
 def test_recent_runs_page_and_skip_unfinished_or_cancelled(tmp_path):
     route = respx.get(f"{BASE}/runs/").mock(
@@ -50,14 +65,25 @@ def test_recent_runs_page_and_skip_unfinished_or_cancelled(tmp_path):
 
 
 @respx.mock
-def test_run_results_come_from_build_steps_by_index(tmp_path):
+def test_run_results_keep_only_build_type_results(tmp_path):
     respx.get(f"{BASE}/runs/10/").mock(return_value=httpx.Response(200, json=DAILY_STEPS))
-    build = respx.get(f"{BASE}/runs/10/artifacts/run_results.json", params={"step": "4"}).mock(
-        return_value=httpx.Response(200, json=run_results({A: "success"}))
-    )
+    build = mock_daily_run_results()
     results = cloud(tmp_path).run_results(RunRef(10))
     assert [dict(r.statuses) for r in results] == [{A: "success"}]
     assert build.call_count == 1
+
+
+@respx.mock
+@pytest.mark.parametrize(
+    ("step_name", "which"),
+    [("Invoke dbt with `dbt --target prod build`", "build"), ("Invoke dbt with `dbt retry`", "retry")],
+)
+def test_build_steps_with_global_flags_or_retry_are_found(tmp_path, step_name, which):
+    respx.get(f"{BASE}/runs/13/").mock(return_value=httpx.Response(200, json=steps((step_name, 10))))
+    respx.get(f"{BASE}/runs/13/artifacts/run_results.json", params={"step": "1"}).mock(
+        return_value=httpx.Response(200, json=run_results({A: "success"}, which))
+    )
+    assert [dict(r.statuses) for r in cloud(tmp_path).run_results(RunRef(13))] == [{A: "success"}]
 
 
 @respx.mock
@@ -78,6 +104,20 @@ def test_skipped_build_step_is_ignored(tmp_path):
 
 
 @respx.mock
+def test_manifest_falls_back_to_the_first_step_with_one(tmp_path):
+    respx.get(f"{BASE}/runs/14/").mock(
+        return_value=httpx.Response(200, json=steps(("Invoke dbt with `dbt compile`", 10)))
+    )
+    respx.get(f"{BASE}/runs/14/artifacts/run_results.json", params={"step": "1"}).mock(
+        return_value=httpx.Response(200, json=run_results({}, "compile"))
+    )
+    respx.get(f"{BASE}/runs/14/artifacts/manifest.json", params={"step": "1"}).mock(
+        return_value=httpx.Response(200, json=manifest(node(A)))
+    )
+    assert A in cloud(tmp_path).manifest(RunRef(14)).nodes
+
+
+@respx.mock
 def test_missing_artifact_is_ignored(tmp_path):
     respx.get(f"{BASE}/runs/12/").mock(
         return_value=httpx.Response(200, json=steps(("Invoke dbt with `dbt build`", 20)))
@@ -89,6 +129,7 @@ def test_missing_artifact_is_ignored(tmp_path):
 @respx.mock
 def test_manifest_is_cached_between_instances(tmp_path):
     respx.get(f"{BASE}/runs/10/").mock(return_value=httpx.Response(200, json=DAILY_STEPS))
+    mock_daily_run_results()
     route = respx.get(f"{BASE}/runs/10/artifacts/manifest.json", params={"step": "4"}).mock(
         return_value=httpx.Response(200, json=manifest(node(A)))
     )
@@ -101,9 +142,7 @@ def test_manifest_is_cached_between_instances(tmp_path):
 @respx.mock
 def test_steps_are_fetched_once_per_run(tmp_path):
     steps_route = respx.get(f"{BASE}/runs/10/").mock(return_value=httpx.Response(200, json=DAILY_STEPS))
-    respx.get(f"{BASE}/runs/10/artifacts/run_results.json").mock(
-        return_value=httpx.Response(200, json=run_results({A: "success"}))
-    )
+    mock_daily_run_results()
     respx.get(f"{BASE}/runs/10/artifacts/manifest.json").mock(return_value=httpx.Response(200, json=manifest()))
     source = cloud(tmp_path)
     source.run_results(RunRef(10))
@@ -136,6 +175,7 @@ def test_prune_cache_keeps_listed_runs_only(tmp_path):
 @respx.mock
 def test_non_json_artifact_fails_and_leaves_no_cache(tmp_path):
     respx.get(f"{BASE}/runs/10/").mock(return_value=httpx.Response(200, json=DAILY_STEPS))
+    mock_daily_run_results()
     respx.get(f"{BASE}/runs/10/artifacts/manifest.json", params={"step": "4"}).mock(
         return_value=httpx.Response(200, text="<html>oops</html>")
     )
@@ -147,6 +187,7 @@ def test_non_json_artifact_fails_and_leaves_no_cache(tmp_path):
 @respx.mock
 def test_corrupt_cached_file_is_discarded_and_refetched(tmp_path):
     respx.get(f"{BASE}/runs/10/").mock(return_value=httpx.Response(200, json=DAILY_STEPS))
+    mock_daily_run_results()
     corrupt = tmp_path / "cache" / "10" / "4" / "manifest.json"
     corrupt.parent.mkdir(parents=True)
     corrupt.write_bytes(b'{"nodes": {tru')

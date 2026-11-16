@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-BUILD_COMMANDS = frozenset({"build", "run", "test", "seed", "snapshot"})
+BUILD_COMMANDS = frozenset({"build", "run", "test", "seed", "snapshot", "retry"})
 CREDIT_STATUSES = frozenset({"success", "pass", "warn"})
 BUILDABLE_TYPES = frozenset({"model", "seed", "snapshot", "test", "unit_test"})
 
