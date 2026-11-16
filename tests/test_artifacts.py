@@ -61,3 +61,25 @@ def test_compile_results_are_not_build():
 def test_parse_run_results_rejects_garbage():
     with pytest.raises(BroomWagonError):
         parse_run_results({"args": {"which": "build"}})
+
+
+def test_unit_test_checksum_comes_from_its_definition():
+    def unit_test(expect_rows):
+        raw = node("unit_test.proj.a.checks_a", depends_on=[A], materialized=None)
+        raw |= {
+            "checksum": {"name": "none", "checksum": ""},
+            "model": "a",
+            "given": [],
+            "expect": {"rows": expect_rows},
+        }
+        return parse_manifest(manifest(raw)).nodes["unit_test.proj.a.checks_a"].checksum
+
+    assert unit_test([{"id": 1}]) == unit_test([{"id": 1}])
+    assert unit_test([{"id": 1}]) != unit_test([{"id": 2}])
+    assert unit_test([{"id": 1}])
+
+
+def test_generic_test_empty_checksum_is_kept():
+    raw = node("test.proj.not_null_a_id.1", attached_node=A, depends_on=[A], materialized="test")
+    raw["checksum"] = {"name": "none", "checksum": ""}
+    assert parse_manifest(manifest(raw)).nodes["test.proj.not_null_a_id.1"].checksum == ""

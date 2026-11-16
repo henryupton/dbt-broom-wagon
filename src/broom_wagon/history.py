@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from broom_wagon.artifacts import CREDIT_STATUSES, Manifest, RunResults
-from broom_wagon.sources import ArtifactSource
+from broom_wagon.sources import ArtifactSource, RunRef
 
 
 class CreditOn(StrEnum):
@@ -17,7 +17,7 @@ class CreditOn(StrEnum):
 @dataclass
 class NodeHistory:
     good: int | None = None
-    ephemeral_checksums: dict[str, str | None] = field(default_factory=dict)
+    upstream_checksums: dict[str, str | None] = field(default_factory=dict)
     ever_run: bool = False
     tests_not_passed: bool = False
 
@@ -27,6 +27,7 @@ class History:
     nodes: dict[str, NodeHistory]
     reference: Manifest | None
     run_ids: list[int]
+    oldest: Manifest | None = None
 
 
 def ephemeral_ancestors(manifest: Manifest, uid: str) -> set[str]:
@@ -40,6 +41,29 @@ def ephemeral_ancestors(manifest: Manifest, uid: str) -> set[str]:
         found.add(parent.unique_id)
         stack.extend(parent.depends_on)
     return found
+
+
+def real_parents(manifest: Manifest, uid: str) -> set[str]:
+    parents: set[str] = set()
+    seen: set[str] = set()
+    stack = list(manifest.nodes[uid].depends_on)
+    while stack:
+        parent_id = stack.pop()
+        if parent_id in seen:
+            continue
+        seen.add(parent_id)
+        parent = manifest.nodes.get(parent_id)
+        if parent is None:
+            continue
+        if parent.is_ephemeral:
+            stack.extend(parent.depends_on)
+        elif parent.is_buildable:
+            parents.add(parent_id)
+    return parents
+
+
+def upstream(manifest: Manifest, uid: str) -> set[str]:
+    return ephemeral_ancestors(manifest, uid) | real_parents(manifest, uid)
 
 
 def _merged_statuses(invocations: Iterable[RunResults]) -> dict[str, str]:
@@ -62,6 +86,7 @@ def build_history(source: ArtifactSource, target: Manifest, *, max_runs: int, cr
     pending = set(nodes)
     tests = _attached_tests(target)
     reference: Manifest | None = None
+    oldest: Manifest | None = None
     run_ids: list[int] = []
 
     for run in source.recent_runs():
@@ -83,6 +108,7 @@ def build_history(source: ArtifactSource, target: Manifest, *, max_runs: int, cr
             break
         if reference is None:
             reference = manifest
+        oldest = manifest
 
         for uid in built:
             pending.discard(uid)
@@ -97,6 +123,8 @@ def build_history(source: ArtifactSource, target: Manifest, *, max_runs: int, cr
                 record.tests_not_passed = True
                 continue
             record.good = run.id
-            record.ephemeral_checksums = {e: manifest.nodes[e].checksum for e in ephemeral_ancestors(manifest, uid)}
+            record.upstream_checksums = {u: manifest.nodes[u].checksum for u in upstream(manifest, uid)}
 
-    return History(nodes=nodes, reference=reference, run_ids=run_ids)
+    if pending and run_ids:
+        oldest = source.manifest(RunRef(run_ids[-1])) or oldest
+    return History(nodes=nodes, reference=reference, run_ids=run_ids, oldest=oldest)

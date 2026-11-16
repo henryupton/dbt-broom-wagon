@@ -1,6 +1,6 @@
 # dbt-broom-wagon
 
-`broom-wagon` works out which dbt nodes need building. It reads the artifacts of a job's recent runs, finds the newest run that built each node's current code successfully, and selects every node whose last good build is missing or older than a parent's, plus their descendants.
+`broom-wagon` works out which dbt nodes need building. It reads the artifacts of a job's recent runs, finds the newest run that built each node's current code successfully, and selects every node whose last good build is missing or whose parents' code has changed since, plus their descendants.
 
 dbt's own deferral compares against the last run that succeeded as a whole, so one failed test discards every successful build in that run. `broom-wagon` keeps them.
 
@@ -43,7 +43,7 @@ DBT_CLOUD_API_TOKEN=... broom-wagon select \
 | `--manifest` | required | Manifest of the commit being deployed, from `dbt parse` |
 | `--max-runs` | `30` | Most runs with build steps to read |
 | `--credit-on` | `model` | `model`: a node's own success counts. `model-and-tests`: its tests must pass too |
-| `--include-unrun` | off | Also select nodes the job has not run in the runs read |
+| `--include-unrun` | off | Also select unchanged nodes the job has not run in the runs read (changed ones are always selected) |
 | `--format` | `select` | `select`, `selector-yaml` or `json` |
 | `--out` | stdout | Write the output to a file |
 | `--cache-dir` | none | Keep downloaded artifacts between invocations |
@@ -87,17 +87,18 @@ Outputs: `select`, `count`, and `json-path` (every selected node with its reason
 
 | Reason | The node is selected because |
 |---|---|
-| `new` | it is not in the newest run's manifest |
+| `new` | it is not in the newest run's manifest, or it never ran and has appeared since the oldest run read |
 | `modified` | its code differs from the newest run's manifest |
 | `tests_not_passed` | under `model-and-tests`, its newest successful build had a test that did not pass |
 | `window_exhausted` | no run read built its current code successfully |
-| `stale_vs:<node>` | a parent built more recently than it did, or an ephemeral parent's code changed |
+| `stale_vs:<node>` | a parent's code changed since its last good build (ephemeral parents included) |
 | `downstream_of:<node>` | it descends from a selected node |
 
 - A node's newest successful build decides its credit, whatever code it built. Reverting a change rebuilds the node.
 - Failed and skipped builds are looked past, since they leave the table as it was.
 - Under `model-and-tests`, only tests that ran in that build must pass. A new test, or a test the job excludes, does not block its model.
-- Runs are compared by id, so a parent and child built in the same run are up to date.
+- A parent rebuilt with unchanged code, such as a backfill or refresh, does not make its children stale.
+- A node that failed after a good build of the same code, with unchanged parents, is left to the next scheduled build.
 - Sources are not parents. Data freshness is out of scope.
 - Ephemeral models never run, so their children look through them to the real parents.
 

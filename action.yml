@@ -1,5 +1,5 @@
 name: dbt broom wagon
-description: Select the dbt nodes whose last successful build is missing or older than a parent's.
+description: Select the dbt nodes whose last successful build is missing or predates a parent's code change.
 
 inputs:
   account-id:

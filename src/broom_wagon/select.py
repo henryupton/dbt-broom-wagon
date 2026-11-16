@@ -5,7 +5,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from broom_wagon.artifacts import BroomWagonError, Manifest
-from broom_wagon.history import History, ephemeral_ancestors
+from broom_wagon.history import History, real_parents, upstream
+
+__all__ = ["Selection", "real_parents", "select"]
 
 
 @dataclass(frozen=True)
@@ -18,25 +20,6 @@ class Selection:
         return len(self.reasons)
 
 
-def real_parents(manifest: Manifest, uid: str) -> set[str]:
-    parents: set[str] = set()
-    seen: set[str] = set()
-    stack = list(manifest.nodes[uid].depends_on)
-    while stack:
-        parent_id = stack.pop()
-        if parent_id in seen:
-            continue
-        seen.add(parent_id)
-        parent = manifest.nodes.get(parent_id)
-        if parent is None:
-            continue
-        if parent.is_ephemeral:
-            stack.extend(parent.depends_on)
-        elif parent.is_buildable:
-            parents.add(parent_id)
-    return parents
-
-
 def _seed_reason(uid: str, target: Manifest, history: History, include_unrun: bool) -> str | None:
     record = history.nodes[uid]
     reference = history.reference.nodes.get(uid) if history.reference else None
@@ -45,17 +28,19 @@ def _seed_reason(uid: str, target: Manifest, history: History, include_unrun: bo
             return "new"
         if record.tests_not_passed:
             return "tests_not_passed"
-        if not record.ever_run and not include_unrun:
-            return None
         if reference.checksum != target.nodes[uid].checksum:
             return "modified"
+        if not record.ever_run:
+            oldest = history.oldest.nodes.get(uid) if history.oldest else None
+            if oldest is None:
+                return "new"
+            if oldest.checksum != target.nodes[uid].checksum:
+                return "modified"
+            if not include_unrun:
+                return None
         return "window_exhausted"
-    for ephemeral in sorted(ephemeral_ancestors(target, uid)):
-        if target.nodes[ephemeral].checksum != record.ephemeral_checksums.get(ephemeral):
-            return f"stale_vs:{ephemeral}"
-    for parent in sorted(real_parents(target, uid)):
-        parent_good = history.nodes[parent].good
-        if parent_good is not None and parent_good > record.good:
+    for parent in sorted(upstream(target, uid)):
+        if target.nodes[parent].checksum != record.upstream_checksums.get(parent):
             return f"stale_vs:{parent}"
     return None
 

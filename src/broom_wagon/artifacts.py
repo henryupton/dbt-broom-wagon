@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -49,15 +51,25 @@ class RunResults:
         return self.command in BUILD_COMMANDS
 
 
-def _node(raw: Mapping[str, Any]) -> Node:
+UNIT_TEST_DEFINITION = ("model", "version", "given", "expect", "overrides", "config")
+
+
+def _checksum(raw: Mapping[str, Any]) -> str | None:
+    if raw.get("resource_type") == "unit_test":
+        definition = {key: raw.get(key) for key in UNIT_TEST_DEFINITION}
+        return hashlib.sha256(json.dumps(definition, sort_keys=True, default=str).encode()).hexdigest()
     checksum = raw.get("checksum")
+    return checksum.get("checksum") if isinstance(checksum, Mapping) else None
+
+
+def _node(raw: Mapping[str, Any]) -> Node:
     return Node(
         unique_id=raw["unique_id"],
         resource_type=raw["resource_type"],
         name=raw["name"],
         package_name=raw.get("package_name", ""),
         fqn=tuple(raw.get("fqn") or ()),
-        checksum=checksum.get("checksum") if isinstance(checksum, Mapping) else None,
+        checksum=_checksum(raw),
         depends_on=tuple((raw.get("depends_on") or {}).get("nodes") or ()),
         materialized=(raw.get("config") or {}).get("materialized"),
         attached_node=raw.get("attached_node"),

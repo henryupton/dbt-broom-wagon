@@ -164,5 +164,5 @@ def test_ephemeral_ancestor_checksums_are_recorded(tmp_path):
     m = manifest(node(E, checksum="e1", materialized="ephemeral"), node(A, depends_on=[E]))
     write_run(tmp_path, 1, m, run_results({A: "success"}))
     h = history(tmp_path, m)
-    assert h.nodes[A].ephemeral_checksums == {E: "e1"}
+    assert h.nodes[A].upstream_checksums == {E: "e1"}
     assert E not in h.nodes
