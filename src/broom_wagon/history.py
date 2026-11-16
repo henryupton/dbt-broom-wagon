@@ -80,18 +80,19 @@ def build_history(source: ArtifactSource, target: Manifest, *, max_runs: int, cr
             continue
         manifest = source.manifest(run)
         if manifest is None:
-            continue
+            break
         if reference is None:
             reference = manifest
 
         for uid in built:
-            previous = manifest.nodes.get(uid)
-            if previous is None or previous.checksum != target.nodes[uid].checksum:
-                continue
             pending.discard(uid)
+            previous = manifest.nodes.get(uid)
+            current = target.nodes[uid].checksum
+            if previous is None or current is None or previous.checksum != current:
+                continue
             record = nodes[uid]
-            if credit_on is CreditOn.MODEL_AND_TESTS and not all(
-                statuses.get(test) in CREDIT_STATUSES for test in tests.get(uid, ())
+            if credit_on is CreditOn.MODEL_AND_TESTS and any(
+                statuses[test] not in CREDIT_STATUSES for test in tests.get(uid, ()) if test in statuses
             ):
                 record.tests_not_passed = True
                 continue

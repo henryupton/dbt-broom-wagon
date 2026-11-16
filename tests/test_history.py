@@ -35,7 +35,7 @@ def test_good_is_newest_credited_run_with_matching_checksum(tmp_path):
     write_run(tmp_path, 2, new, run_results({A: "success"}))
     write_run(tmp_path, 3, new, run_results({A: "error"}))
     assert history(tmp_path, new).nodes[A].good == 2
-    assert history(tmp_path, old).nodes[A].good == 1
+    assert history(tmp_path, old).nodes[A].good is None
 
 
 def test_partial_failure_credits_the_nodes_that_succeeded(tmp_path):
@@ -66,10 +66,53 @@ def test_failed_test_withdraws_credit_under_model_and_tests(tmp_path):
     assert h.nodes[T].good == 1
 
 
-def test_model_and_tests_needs_the_tests_to_have_run(tmp_path):
+def test_model_and_tests_ignores_tests_that_did_not_run(tmp_path):
     m = manifest(node(A), node(T, attached_node=A, depends_on=[A], materialized="test"))
     write_run(tmp_path, 1, m, run_results({A: "success"}, command="run"))
-    assert history(tmp_path, m, credit_on=CreditOn.MODEL_AND_TESTS).nodes[A].tests_not_passed
+    h = history(tmp_path, m, credit_on=CreditOn.MODEL_AND_TESTS)
+    assert h.nodes[A].good == 1
+    assert not h.nodes[A].tests_not_passed
+
+
+def test_failing_test_that_ran_still_blocks_credit(tmp_path):
+    m = manifest(node(A), node(T, attached_node=A, depends_on=[A], materialized="test"))
+    write_run(tmp_path, 1, m, run_results({A: "success", T: "error"}))
+    h = history(tmp_path, m, credit_on=CreditOn.MODEL_AND_TESTS)
+    assert h.nodes[A].good is None
+    assert h.nodes[A].tests_not_passed
+
+
+def test_older_matching_build_behind_newer_different_code_gives_no_good(tmp_path):
+    v1, v2 = manifest(node(A, checksum="v1")), manifest(node(A, checksum="v2"))
+    write_run(tmp_path, 1, v1, run_results({A: "success"}))
+    write_run(tmp_path, 2, v2, run_results({A: "success"}))
+    assert history(tmp_path, v1).nodes[A].good is None
+
+
+def test_failed_build_of_other_code_is_looked_past(tmp_path):
+    v1, v2 = manifest(node(A, checksum="v1")), manifest(node(A, checksum="v2"))
+    write_run(tmp_path, 1, v1, run_results({A: "success"}))
+    write_run(tmp_path, 2, v2, run_results({A: "error"}))
+    assert history(tmp_path, v1).nodes[A].good == 1
+
+
+def test_missing_checksums_never_match(tmp_path):
+    none = manifest(node(A, checksum=None))
+    write_run(tmp_path, 1, none, run_results({A: "success"}))
+    assert history(tmp_path, none).nodes[A].good is None
+    write_run(tmp_path, 2, manifest(node(A, checksum="v1")), run_results({B: "error"}))
+    assert history(tmp_path, manifest(node(A, checksum=None))).nodes[A].good is None
+
+
+def test_unreadable_manifest_stops_the_walk(tmp_path):
+    m = manifest(node(A), node(B))
+    write_run(tmp_path, 1, m, run_results({A: "success", B: "success"}))
+    write_run(tmp_path, 2, None, run_results({A: "success"}))
+    h = history(tmp_path, m)
+    assert h.nodes[A].good is None
+    assert h.nodes[B].good is None
+    assert h.reference is None
+    assert h.run_ids == [2]
 
 
 def test_last_invocation_wins(tmp_path):

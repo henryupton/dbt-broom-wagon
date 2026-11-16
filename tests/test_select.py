@@ -104,3 +104,42 @@ def test_no_history_fails():
     target = parse_manifest(manifest(node(A)))
     with pytest.raises(BroomWagonError, match="no runs with build steps"):
         select(target, History(nodes={}, reference=None, run_ids=[]))
+
+
+def test_revert_rebuilds_the_node_and_descendants(tmp_path):
+    v1 = manifest(node(A, checksum="v1"), node(B, depends_on=[A]))
+    v2 = manifest(node(A, checksum="v2"), node(B, depends_on=[A]))
+    write_run(tmp_path, 1, v1, run_results({A: "success", B: "success"}))
+    write_run(tmp_path, 2, v2, run_results({A: "success", B: "success"}))
+    assert pick(tmp_path, v1) == {A: "modified", B: f"downstream_of:{A}"}
+
+
+def test_failed_tests_win_over_modified(tmp_path):
+    t = node(T, attached_node=A, depends_on=[A], materialized="test")
+    write_run(tmp_path, 1, manifest(node(A, checksum="v1"), t), run_results({A: "success", T: "fail"}))
+    target = manifest(node(A, checksum="v1"), t)
+    assert pick(tmp_path, target, credit_on=CreditOn.MODEL_AND_TESTS)[A] == "tests_not_passed"
+
+
+def test_include_unrun_with_changed_checksum_is_modified(tmp_path):
+    write_run(tmp_path, 1, manifest(node(A), node(U, checksum="v1")), run_results({A: "success"}))
+    target = manifest(node(A), node(U, checksum="v2"))
+    assert pick(tmp_path, target) == {}
+    assert pick(tmp_path, target, include_unrun=True) == {U: "modified"}
+
+
+def test_new_test_does_not_select_its_model_under_model_and_tests(tmp_path):
+    write_run(tmp_path, 1, manifest(node(A)), run_results({A: "success"}))
+    target = manifest(node(A), node(T, attached_node=A, depends_on=[A], materialized="test"))
+    assert pick(tmp_path, target, credit_on=CreditOn.MODEL_AND_TESTS) == {T: "new"}
+
+
+def test_node_below_two_seeds_is_attributed_to_the_first_sorted(tmp_path):
+    write_run(
+        tmp_path,
+        1,
+        manifest(node(A, checksum="v1"), node(B, checksum="v1"), node(C, depends_on=[A, B])),
+        run_results({A: "success", B: "success", C: "success"}),
+    )
+    target = manifest(node(A, checksum="v2"), node(B, checksum="v2"), node(C, depends_on=[A, B]))
+    assert pick(tmp_path, target)[C] == f"downstream_of:{A}"
