@@ -1,6 +1,6 @@
 [project]
 name = "dbt-broom-wagon"
-version = "0.1.0"
+version = "0.2.0"
 description = "Select the dbt nodes whose last successful build is missing or predates a parent's code change."
 readme = "README.md"
 license = "Apache-2.0"
