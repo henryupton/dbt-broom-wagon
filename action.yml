@@ -1,0 +1,73 @@
+name: dbt broom wagon
+description: Select the dbt nodes whose last successful build is missing or older than a parent's.
+
+inputs:
+  account-id:
+    description: dbt Cloud account id.
+    required: true
+  job-id:
+    description: dbt Cloud job whose runs make up the history.
+    required: true
+  api-token:
+    description: dbt Cloud service token that can read runs and artifacts.
+    required: true
+  host:
+    description: dbt Cloud access URL host.
+    default: cloud.getdbt.com
+  manifest-path:
+    description: Manifest of the commit being deployed.
+    default: target/manifest.json
+  max-runs:
+    description: Most runs with build steps to read.
+    default: "30"
+  credit-on:
+    description: model or model-and-tests.
+    default: model
+  include-unrun:
+    description: Also select nodes the job has not run in the runs read.
+    default: "false"
+
+outputs:
+  select:
+    description: The --select string. Empty when nothing needs building.
+    value: ${{ steps.select.outputs.select }}
+  count:
+    description: Number of selected nodes.
+    value: ${{ steps.select.outputs.count }}
+  json-path:
+    description: Path to the JSON output with every node and its reason.
+    value: ${{ steps.select.outputs.json-path }}
+
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v6
+
+    - uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/broom-wagon-cache
+        key: broom-wagon-${{ inputs.account-id }}-${{ inputs.job-id }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: broom-wagon-${{ inputs.account-id }}-${{ inputs.job-id }}-
+
+    - id: select
+      shell: bash
+      env:
+        DBT_CLOUD_API_TOKEN: ${{ inputs.api-token }}
+        BW_ACTION_PATH: ${{ github.action_path }}
+        BW_ACCOUNT_ID: ${{ inputs.account-id }}
+        BW_JOB_ID: ${{ inputs.job-id }}
+        BW_HOST: ${{ inputs.host }}
+        BW_MANIFEST: ${{ inputs.manifest-path }}
+        BW_MAX_RUNS: ${{ inputs.max-runs }}
+        BW_CREDIT_ON: ${{ inputs.credit-on }}
+        BW_INCLUDE_UNRUN: ${{ inputs.include-unrun }}
+      run: |
+        out="$RUNNER_TEMP/broom-wagon.json"
+        args=(select --source dbt-cloud
+          --account-id "$BW_ACCOUNT_ID" --job-id "$BW_JOB_ID" --host "$BW_HOST"
+          --manifest "$BW_MANIFEST" --max-runs "$BW_MAX_RUNS" --credit-on "$BW_CREDIT_ON"
+          --cache-dir "$RUNNER_TEMP/broom-wagon-cache"
+          --format json --out "$out" --github-output)
+        if [ "$BW_INCLUDE_UNRUN" = "true" ]; then args+=(--include-unrun); fi
+        uvx --from "$BW_ACTION_PATH" broom-wagon "${args[@]}"
+        echo "json-path=$out" >> "$GITHUB_OUTPUT"
