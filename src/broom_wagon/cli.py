@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 import click
@@ -65,6 +66,10 @@ def select_command(
     github_output,
 ) -> None:
     """Work out which nodes to build."""
+    github_output_path = os.environ.get("GITHUB_OUTPUT")
+    if github_output and not github_output_path:
+        raise click.ClickException("--github-output needs GITHUB_OUTPUT to be set")
+    host = re.sub(r"^https?://", "", host).rstrip("/")
     source = _source(kind, runs_dir, account_id, job_id, host, api_token, cache_dir)
     try:
         target = parse_manifest(json.loads(manifest_path.read_text()))
@@ -88,8 +93,5 @@ def select_command(
     click.echo(f"{summary} {counts}".rstrip(), err=True)
 
     if github_output:
-        path = os.environ.get("GITHUB_OUTPUT")
-        if not path:
-            raise click.ClickException("--github-output needs GITHUB_OUTPUT to be set")
-        with open(path, "a") as fh:
+        with open(github_output_path, "a") as fh:
             fh.write(f"select={as_select(selection, target)}\ncount={selection.count}\n")

@@ -1,5 +1,6 @@
 import json
 
+import click
 from click.testing import CliRunner
 
 from broom_wagon.cli import main
@@ -77,3 +78,27 @@ def test_github_output_needs_the_env_var(tmp_path, monkeypatch):
     result = CliRunner().invoke(main, [*setup(tmp_path), "--github-output"])
     assert result.exit_code == 1
     assert "GITHUB_OUTPUT" in result.stderr
+
+
+def test_github_output_precondition_fails_before_any_output(tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    out = tmp_path / "out.txt"
+    result = CliRunner().invoke(main, [*setup(tmp_path), "--out", str(out), "--github-output"])
+    assert result.exit_code == 1
+    assert "GITHUB_OUTPUT" in result.output
+    assert not out.exists()
+
+
+def test_host_is_normalised_before_building_the_source(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake(**kwargs):
+        seen.update(kwargs)
+        raise click.ClickException("stop")
+
+    monkeypatch.setattr("broom_wagon.cli.DbtCloudSource", fake)
+    manifest_path = tmp_path / "m.json"
+    manifest_path.write_text("{}")
+    args = ["select", "--source", "dbt-cloud", "--account-id", "1", "--job-id", "2", "--api-token", "t"]
+    CliRunner().invoke(main, [*args, "--host", "https://au1.dbt.com/", "--manifest", str(manifest_path)])
+    assert seen["host"] == "au1.dbt.com"
