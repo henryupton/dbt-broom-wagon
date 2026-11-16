@@ -8,9 +8,9 @@ It selects nodes and stops there. Your workflow triggers the run.
 
 ## What it detects
 
-Change detection is the node body checksum, the same as `state:modified.body`. Edits to a model's SQL or Python body are seen. These are not:
+Change detection is the node body checksum, the same as `state:modified.body`. Edits to a model's SQL or Python body are seen, and so are edits to a unit test's definition. These are not:
 
-- macro edits
+- macro edits, except for materialisations passed to `--macro-sensitive`
 - config and YAML property changes
 - var or env changes
 
@@ -44,6 +44,7 @@ DBT_CLOUD_API_TOKEN=... broom-wagon select \
 | `--max-runs` | `30` | Most runs with build steps to read |
 | `--credit-on` | `model` | `model`: a node's own success counts. `model-and-tests`: its tests must pass too |
 | `--include-unrun` | off | Also select unchanged nodes the job has not run in the runs read (changed ones are always selected) |
+| `--macro-sensitive` | none | A materialisation whose nodes also count edits to the macros they call as code changes, such as `streamlit`. Repeatable |
 | `--format` | `select` | `select`, `selector-yaml` or `json` |
 | `--out` | stdout | Write the output to a file |
 | `--cache-dir` | none | Keep downloaded artifacts between invocations |
@@ -80,6 +81,7 @@ Pass the selection through `env:` and quote the variable. Never put `${{ }}` ins
 | `max-runs` | `30` |
 | `credit-on` | `model` |
 | `include-unrun` | `false` |
+| `macro-sensitive` | none (space-separated list) |
 
 Outputs: `select`, `count`, and `json-path` (every selected node with its reason). The Action caches downloaded artifacts between workflow runs.
 

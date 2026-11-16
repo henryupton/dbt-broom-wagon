@@ -26,6 +26,9 @@ inputs:
   include-unrun:
     description: Also select nodes the job has not run in the runs read.
     default: "false"
+  macro-sensitive:
+    description: Space-separated materialisations whose nodes also count edits to the macros they call.
+    default: ""
 
 outputs:
   select:
@@ -61,6 +64,7 @@ runs:
         BW_MAX_RUNS: ${{ inputs.max-runs }}
         BW_CREDIT_ON: ${{ inputs.credit-on }}
         BW_INCLUDE_UNRUN: ${{ inputs.include-unrun }}
+        BW_MACRO_SENSITIVE: ${{ inputs.macro-sensitive }}
       run: |
         out="$RUNNER_TEMP/broom-wagon.json"
         args=(select --source dbt-cloud
@@ -69,5 +73,6 @@ runs:
           --cache-dir "$RUNNER_TEMP/broom-wagon-cache"
           --format json --out "$out" --github-output)
         if [ "$BW_INCLUDE_UNRUN" = "true" ]; then args+=(--include-unrun); fi
+        for m in $BW_MACRO_SENSITIVE; do args+=(--macro-sensitive "$m"); done
         uv run --project "$BW_ACTION_PATH" --frozen broom-wagon "${args[@]}"
         echo "json-path=$out" >> "$GITHUB_OUTPUT"

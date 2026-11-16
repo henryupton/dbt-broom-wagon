@@ -10,6 +10,7 @@ import click
 from broom_wagon.artifacts import BroomWagonError, parse_manifest
 from broom_wagon.emit import FORMATS, as_select, reason_counts, render, roots
 from broom_wagon.history import CreditOn, build_history
+from broom_wagon.macros import MacroFoldingSource, fold_macros
 from broom_wagon.select import select
 from broom_wagon.sources import ArtifactSource
 from broom_wagon.sources.dbt_cloud import DbtCloudSource, prune_cache
@@ -46,6 +47,11 @@ def _source(kind, runs_dir, account_id, job_id, host, api_token, cache_dir) -> A
 @click.option("--max-runs", type=click.IntRange(min=1), default=30, show_default=True)
 @click.option("--credit-on", type=click.Choice([c.value for c in CreditOn]), default="model", show_default=True)
 @click.option("--include-unrun", is_flag=True, help="Also select nodes the job has not run in the runs read.")
+@click.option(
+    "--macro-sensitive",
+    multiple=True,
+    help="Materialisation whose nodes also count edits to the macros they call as code changes. Repeatable.",
+)
 @click.option("--format", "fmt", type=click.Choice(FORMATS), default="select", show_default=True)
 @click.option("--out", type=click.Path(path_type=Path, dir_okay=False))
 @click.option("--github-output", is_flag=True, help="Append select and count to $GITHUB_OUTPUT.")
@@ -61,6 +67,7 @@ def select_command(
     max_runs,
     credit_on,
     include_unrun,
+    macro_sensitive,
     fmt,
     out,
     github_output,
@@ -73,6 +80,9 @@ def select_command(
     source = _source(kind, runs_dir, account_id, job_id, host, api_token, cache_dir)
     try:
         target = parse_manifest(json.loads(manifest_path.read_text()))
+        if macro_sensitive:
+            source = MacroFoldingSource(source, frozenset(macro_sensitive))
+            target = fold_macros(target, frozenset(macro_sensitive))
         history = build_history(source, target, max_runs=max_runs, credit_on=CreditOn(credit_on))
         selection = select(target, history, include_unrun=include_unrun)
     except (BroomWagonError, OSError, ValueError) as exc:

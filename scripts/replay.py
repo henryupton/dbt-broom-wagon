@@ -15,6 +15,7 @@ import click
 
 from broom_wagon.artifacts import BroomWagonError, Manifest, RunResults
 from broom_wagon.history import CreditOn, build_history
+from broom_wagon.macros import MacroFoldingSource
 from broom_wagon.select import select
 from broom_wagon.sources import ArtifactSource, RunRef
 from broom_wagon.sources.dbt_cloud import FINISHED, DbtCloudSource
@@ -123,6 +124,11 @@ def replay_one(
 @click.option("--max-runs", type=click.IntRange(min=1), default=30, show_default=True)
 @click.option("--credit-on", type=click.Choice([c.value for c in CreditOn]), default="model", show_default=True)
 @click.option("--include-unrun", is_flag=True)
+@click.option(
+    "--macro-sensitive",
+    multiple=True,
+    help="Materialisation whose nodes also count edits to the macros they call as code changes. Repeatable.",
+)
 @click.option("--out", type=click.Path(path_type=Path, dir_okay=False), required=True)
 def main(
     kind,
@@ -138,6 +144,7 @@ def main(
     max_runs,
     credit_on,
     include_unrun,
+    macro_sensitive,
     out,
 ) -> None:
     """Replay past runs and compare broom-wagon's selection with what each run built."""
@@ -159,6 +166,8 @@ def main(
             targets += cloud_targets(source, re.compile(target_cause), last)
         if not targets:
             raise click.UsageError("give --target-run or --target-cause")
+        if macro_sensitive:
+            source = MacroFoldingSource(source, frozenset(macro_sensitive))
         listed = ListedRuns(source)
         reports = []
         for run_id in sorted(set(targets), reverse=True):

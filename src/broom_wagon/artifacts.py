@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 BUILD_COMMANDS = frozenset({"build", "run", "test", "seed", "snapshot", "retry"})
@@ -26,6 +26,7 @@ class Node:
     depends_on: tuple[str, ...]
     materialized: str | None
     attached_node: str | None
+    macros: tuple[str, ...] = ()
 
     @property
     def is_ephemeral(self) -> bool:
@@ -37,8 +38,15 @@ class Node:
 
 
 @dataclass(frozen=True)
+class Macro:
+    sql_hash: str
+    depends_on: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Manifest:
     nodes: Mapping[str, Node]
+    macros: Mapping[str, Macro] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -73,6 +81,14 @@ def _node(raw: Mapping[str, Any]) -> Node:
         depends_on=tuple((raw.get("depends_on") or {}).get("nodes") or ()),
         materialized=(raw.get("config") or {}).get("materialized"),
         attached_node=raw.get("attached_node"),
+        macros=tuple((raw.get("depends_on") or {}).get("macros") or ()),
+    )
+
+
+def _macro(raw: Mapping[str, Any]) -> Macro:
+    return Macro(
+        sql_hash=hashlib.sha256((raw.get("macro_sql") or "").encode()).hexdigest(),
+        depends_on=tuple((raw.get("depends_on") or {}).get("macros") or ()),
     )
 
 
@@ -83,7 +99,8 @@ def parse_manifest(data: Mapping[str, Any]) -> Manifest:
             *data.get("unit_tests", {}).values(),
             *data.get("sources", {}).values(),
         ]
-        return Manifest(nodes={n.unique_id: n for n in map(_node, raws)})
+        macros = {uid: _macro(raw) for uid, raw in (data.get("macros") or {}).items()}
+        return Manifest(nodes={n.unique_id: n for n in map(_node, raws)}, macros=macros)
     except (KeyError, TypeError, AttributeError) as exc:
         raise BroomWagonError(f"unreadable manifest: {exc!r}") from exc
 
