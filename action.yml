@@ -55,7 +55,7 @@ runs:
     - if: inputs.source == 'dbt-cloud'
       uses: actions/cache@v4
       with:
-        path: ${{ runner.temp }}/broom-wagon-cache
+        path: ${{ runner.temp }}/broom-wagon-cache/${{ inputs.account-id }}-${{ inputs.job-id }}
         key: broom-wagon-${{ inputs.account-id }}-${{ inputs.job-id }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: broom-wagon-${{ inputs.account-id }}-${{ inputs.job-id }}-
 
@@ -69,6 +69,7 @@ runs:
         BW_ACCOUNT_ID: ${{ inputs.account-id }}
         BW_JOB_ID: ${{ inputs.job-id }}
         BW_HOST: ${{ inputs.host }}
+        BW_CACHE_DIR: ${{ runner.temp }}/broom-wagon-cache/${{ inputs.account-id }}-${{ inputs.job-id }}
         BW_MANIFEST: ${{ inputs.manifest-path }}
         BW_MAX_RUNS: ${{ inputs.max-runs }}
         BW_CREDIT_ON: ${{ inputs.credit-on }}
@@ -80,7 +81,7 @@ runs:
           --manifest "$BW_MANIFEST" --max-runs "$BW_MAX_RUNS" --credit-on "$BW_CREDIT_ON"
           --format json --out "$out" --github-output)
         if [ "$BW_SOURCE" = "dbt-cloud" ]; then
-          args+=(--host "$BW_HOST" --cache-dir "$RUNNER_TEMP/broom-wagon-cache")
+          args+=(--host "$BW_HOST" --cache-dir "$BW_CACHE_DIR")
         fi
         if [ -n "$BW_RUNS_DIR" ]; then args+=(--runs-dir "$BW_RUNS_DIR"); fi
         if [ -n "$BW_ACCOUNT_ID" ]; then args+=(--account-id "$BW_ACCOUNT_ID"); fi
