@@ -75,7 +75,9 @@ Pass the selection through `env:` and quote the variable. Never put `${{ }}` ins
 
 | Input | Default |
 |---|---|
-| `account-id`, `job-id`, `api-token` | required |
+| `source` | `dbt-cloud` |
+| `runs-dir` | none |
+| `account-id`, `job-id`, `api-token` | required for `dbt-cloud` |
 | `host` | `cloud.getdbt.com` |
 | `manifest-path` | `target/manifest.json` |
 | `max-runs` | `30` |
@@ -83,7 +85,7 @@ Pass the selection through `env:` and quote the variable. Never put `${{ }}` ins
 | `include-unrun` | `false` |
 | `macro-sensitive` | none (space-separated list) |
 
-Outputs: `select`, `count`, and `json-path` (every selected node with its reason). The Action caches downloaded artifacts between workflow runs.
+Outputs: `select`, `count`, and `json-path` (every selected node with its reason). With `source: dbt-cloud`, the Action caches downloaded artifacts between workflow runs. `source: local` reads saved runs from `runs-dir`, laid out as for `--source local`, and needs no dbt Cloud inputs.
 
 ## Selection rule
 
