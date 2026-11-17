@@ -3,12 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from typing import Any
 
 BUILD_COMMANDS = frozenset({"build", "run", "test", "seed", "snapshot", "retry"})
 CREDIT_STATUSES = frozenset({"success", "pass", "warn"})
 BUILDABLE_TYPES = frozenset({"model", "seed", "snapshot", "test", "unit_test"})
+
+# The cache holds parsed artifacts, so any edit to this module starts a new cache.
+CACHE_FORMAT = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
 
 
 class BroomWagonError(Exception):
@@ -113,3 +117,28 @@ def parse_run_results(data: Mapping[str, Any]) -> RunResults:
         )
     except (KeyError, TypeError, AttributeError) as exc:
         raise BroomWagonError(f"unreadable run results: {exc!r}") from exc
+
+
+def _from_json[T](cls: type[T], raw: Mapping[str, Any]) -> T:
+    return cls(**{key: tuple(value) if isinstance(value, list) else value for key, value in raw.items()})
+
+
+def dump_manifest(manifest: Manifest) -> dict[str, Any]:
+    return {
+        "nodes": [asdict(node) for node in manifest.nodes.values()],
+        "macros": {uid: asdict(macro) for uid, macro in manifest.macros.items()},
+    }
+
+
+def load_manifest(data: Mapping[str, Any]) -> Manifest:
+    nodes = [_from_json(Node, raw) for raw in data["nodes"]]
+    macros = {uid: _from_json(Macro, raw) for uid, raw in data["macros"].items()}
+    return Manifest(nodes={node.unique_id: node for node in nodes}, macros=macros)
+
+
+def dump_run_results(results: RunResults) -> dict[str, Any]:
+    return asdict(results)
+
+
+def load_run_results(data: Mapping[str, Any]) -> RunResults:
+    return _from_json(RunResults, data)

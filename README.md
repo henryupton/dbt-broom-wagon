@@ -47,12 +47,13 @@ DBT_CLOUD_API_TOKEN=... broom-wagon select \
 | `--macro-sensitive` | none | A materialisation whose nodes also count edits to the macros they call as code changes, such as `streamlit`. Repeatable |
 | `--format` | `select` | `select`, `selector-yaml` or `json` |
 | `--out` | stdout | Write the output to a file |
-| `--cache-dir` | none | Keep downloaded artifacts between invocations |
+| `--cache-dir` | none | Keep a trimmed copy of each downloaded artifact between invocations |
 | `--github-output` | off | Append `select` and `count` to `$GITHUB_OUTPUT` |
 
 - An empty selection prints nothing and exits 0. `dbt build --select ''` builds the whole project, so check the count before you trigger anything.
 - An API, auth or parse failure exits 1.
 - The dbt Cloud token needs read access to the job's runs and artifacts.
+- `--cache-dir` keeps only what `broom-wagon` reads from each artifact, so a 70 MB manifest takes about 5 MB. Each parser version gets its own folder, and `select` deletes the others.
 - `--source local` reads `<runs-dir>/<run id>/manifest.json` and `run_results.json` (or `run_results.1.json`, `run_results.2.json` for several invocations).
 
 ## GitHub Action

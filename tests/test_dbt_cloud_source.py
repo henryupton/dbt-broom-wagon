@@ -2,7 +2,7 @@ import httpx
 import pytest
 import respx
 
-from broom_wagon.artifacts import BroomWagonError
+from broom_wagon.artifacts import CACHE_FORMAT, BroomWagonError
 from broom_wagon.sources import RunRef
 from broom_wagon.sources.dbt_cloud import DbtCloudSource, prune_cache
 from tests.factory import manifest, node, run_results
@@ -136,7 +136,7 @@ def test_manifest_is_cached_between_instances(tmp_path):
     assert A in cloud(tmp_path).manifest(RunRef(10)).nodes
     assert A in cloud(tmp_path).manifest(RunRef(10)).nodes
     assert route.call_count == 1
-    assert (tmp_path / "cache" / "10" / "4" / "manifest.json").exists()
+    assert (tmp_path / "cache" / CACHE_FORMAT / "10" / "4" / "manifest.json").exists()
 
 
 @respx.mock
@@ -165,11 +165,14 @@ def test_network_error_fails(tmp_path):
 
 
 def test_prune_cache_keeps_listed_runs_only(tmp_path):
-    for name in ("1", "2", "3", "notes"):
+    for name in ("1", "2", "3"):
+        (tmp_path / CACHE_FORMAT / name).mkdir(parents=True)
+    for name in ("7", "0123456789ab", "notes"):
         (tmp_path / name).mkdir()
     (tmp_path / "4").write_text("not a dir")
     prune_cache(tmp_path, keep=[2])
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["2", "4", "notes"]
+    assert sorted(p.name for p in (tmp_path / CACHE_FORMAT).iterdir()) == ["2"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted([CACHE_FORMAT, "4", "notes"])
 
 
 @respx.mock
@@ -181,14 +184,14 @@ def test_non_json_artifact_fails_and_leaves_no_cache(tmp_path):
     )
     with pytest.raises(BroomWagonError, match="unreadable JSON for /runs/10/artifacts/manifest.json\\?step=4"):
         cloud(tmp_path).manifest(RunRef(10))
-    assert not (tmp_path / "cache" / "10" / "4" / "manifest.json").exists()
+    assert not (tmp_path / "cache" / CACHE_FORMAT / "10" / "4" / "manifest.json").exists()
 
 
 @respx.mock
 def test_corrupt_cached_file_is_discarded_and_refetched(tmp_path):
     respx.get(f"{BASE}/runs/10/").mock(return_value=httpx.Response(200, json=DAILY_STEPS))
     mock_daily_run_results()
-    corrupt = tmp_path / "cache" / "10" / "4" / "manifest.json"
+    corrupt = tmp_path / "cache" / CACHE_FORMAT / "10" / "4" / "manifest.json"
     corrupt.parent.mkdir(parents=True)
     corrupt.write_bytes(b'{"nodes": {tru')
     route = respx.get(f"{BASE}/runs/10/artifacts/manifest.json", params={"step": "4"}).mock(

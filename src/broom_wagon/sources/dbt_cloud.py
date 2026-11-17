@@ -6,18 +6,41 @@ import re
 import shutil
 import tempfile
 from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any
 
 import httpx
 
-from broom_wagon.artifacts import BroomWagonError, Manifest, RunResults, parse_manifest, parse_run_results
+from broom_wagon.artifacts import (
+    CACHE_FORMAT,
+    BroomWagonError,
+    Manifest,
+    RunResults,
+    dump_manifest,
+    dump_run_results,
+    load_manifest,
+    load_run_results,
+    parse_manifest,
+    parse_run_results,
+)
 from broom_wagon.sources import RunRef
 
 FINISHED = frozenset({10, 20})
 DBT_STEP = re.compile(r"Invoke dbt with `dbt")
+OLD_CACHE = re.compile(r"\d+|[0-9a-f]{12}")
 
-T = TypeVar("T")
+
+@dataclass(frozen=True)
+class Artifact[T]:
+    name: str
+    parse: Callable[[Any], T]
+    dump: Callable[[T], Any]
+    load: Callable[[Any], T]
+
+
+MANIFEST = Artifact("manifest.json", parse_manifest, dump_manifest, load_manifest)
+RUN_RESULTS = Artifact("run_results.json", parse_run_results, dump_run_results, load_run_results)
 
 
 class DbtCloudSource:
@@ -33,7 +56,7 @@ class DbtCloudSource:
     ) -> None:
         self.base = f"https://{host}/api/v2/accounts/{account_id}"
         self.job_id = job_id
-        self.cache_dir = cache_dir
+        self.cache_root = cache_dir / CACHE_FORMAT if cache_dir is not None else None
         self.page_size = page_size
         self.client = httpx.Client(
             headers={"Authorization": f"Token {token}", "Accept": "application/json"}, timeout=300
@@ -97,31 +120,31 @@ class DbtCloudSource:
                 raise BroomWagonError(f"dbt Cloud returned malformed run steps for {path}") from exc
         return self._steps[run.id]
 
-    def _artifact(self, run: RunRef, step: int, name: str, parse: Callable[[Any], T]) -> T | None:
-        path = f"/runs/{run.id}/artifacts/{name}?step={step}"
-        cached = self.cache_dir / str(run.id) / str(step) / name if self.cache_dir else None
+    def _artifact[T](self, run: RunRef, step: int, artifact: Artifact[T]) -> T | None:
+        path = f"/runs/{run.id}/artifacts/{artifact.name}?step={step}"
+        cached = self.cache_root / str(run.id) / str(step) / artifact.name if self.cache_root is not None else None
         if cached is not None and cached.exists():
             try:
-                return parse(json.loads(cached.read_bytes()))
-            except (ValueError, KeyError, TypeError, BroomWagonError):
+                return artifact.load(json.loads(cached.read_bytes()))
+            except (ValueError, KeyError, TypeError, AttributeError):
                 cached.unlink()
-        response = self._get(f"/runs/{run.id}/artifacts/{name}", {"step": step}, allow_404=True)
+        response = self._get(f"/runs/{run.id}/artifacts/{artifact.name}", {"step": step}, allow_404=True)
         if response.status_code == 404:
             return None
         try:
-            parsed = parse(json.loads(response.content))
+            parsed = artifact.parse(json.loads(response.content))
         except ValueError as exc:
             raise BroomWagonError(f"dbt Cloud returned unreadable JSON for {path}") from exc
         except (KeyError, TypeError, AttributeError) as exc:
             raise BroomWagonError(f"dbt Cloud returned a malformed artifact for {path}") from exc
         if cached is not None:
-            _write_atomic(cached, response.content)
+            _write_atomic(cached, json.dumps(artifact.dump(parsed), separators=(",", ":")).encode())
         return parsed
 
     def run_results(self, run: RunRef) -> list[RunResults]:
         results = []
         for step in self._dbt_steps(run):
-            parsed = self._artifact(run, step, "run_results.json", parse_run_results)
+            parsed = self._artifact(run, step, RUN_RESULTS)
             if parsed is not None and parsed.is_build:
                 results.append(parsed)
         return results
@@ -129,13 +152,13 @@ class DbtCloudSource:
     def manifest(self, run: RunRef) -> Manifest | None:
         steps = self._dbt_steps(run)
         for step in steps:
-            results = self._artifact(run, step, "run_results.json", parse_run_results)
+            results = self._artifact(run, step, RUN_RESULTS)
             if results is not None and results.is_build:
-                parsed = self._artifact(run, step, "manifest.json", parse_manifest)
+                parsed = self._artifact(run, step, MANIFEST)
                 if parsed is not None:
                     return parsed
         for step in steps:
-            parsed = self._artifact(run, step, "manifest.json", parse_manifest)
+            parsed = self._artifact(run, step, MANIFEST)
             if parsed is not None:
                 return parsed
         return None
@@ -154,9 +177,14 @@ def _write_atomic(path: Path, body: bytes) -> None:
 
 
 def prune_cache(cache_dir: Path, keep: Iterable[int]) -> None:
-    kept = {str(run_id) for run_id in keep}
     if not cache_dir.is_dir():
         return
+    current = cache_dir / CACHE_FORMAT
     for path in cache_dir.iterdir():
-        if path.is_dir() and path.name.isdigit() and path.name not in kept:
+        if path.is_dir() and path != current and OLD_CACHE.fullmatch(path.name):
             shutil.rmtree(path)
+    if current.is_dir():
+        kept = {str(run_id) for run_id in keep}
+        for path in current.iterdir():
+            if path.is_dir() and path.name.isdigit() and path.name not in kept:
+                shutil.rmtree(path)
