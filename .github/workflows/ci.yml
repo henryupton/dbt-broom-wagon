@@ -110,3 +110,108 @@ jobs:
           expect "missing manifest outcome" "$NO_MANIFEST_OUTCOME" "failure"
           expect "trigger args" "$TRIGGER_ARGS" "dbt build --select stg_orders+"
           exit "$status"
+
+  action-cache:
+    name: Action cache
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    env:
+      # A new account and job id per attempt, so each attempt starts with no cache entry.
+      ACCOUNT_ID: ${{ github.run_attempt }}
+      JOB_ID: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Start a fake dbt Cloud
+        run: |
+          fake="$RUNNER_TEMP/fake-dbt-cloud"
+          python3 tests/action/fake_dbt_cloud.py certs "$fake"
+          mkdir "$fake/runs"
+          cp -R tests/action/runs/1 "$fake/runs/1"
+          nohup python3 tests/action/fake_dbt_cloud.py serve "$fake" > "$fake/server.out" 2>&1 &
+          curl -sS -o /dev/null --retry 10 --retry-connrefused --retry-delay 1 --cacert "$fake/ca.pem" https://localhost:8443/
+          echo "FAKE=$fake" >> "$GITHUB_ENV"
+          echo "SSL_CERT_FILE=$fake/bundle.pem" >> "$GITHUB_ENV"
+
+      - id: cold
+        name: Select with no cache entry
+        uses: ./
+        with:
+          account-id: ${{ env.ACCOUNT_ID }}
+          job-id: ${{ env.JOB_ID }}
+          api-token: fake
+          host: localhost:8443
+          manifest-path: tests/action/changed.json
+
+      - name: Check the cold run downloaded run 1
+        run: python3 tests/action/fake_dbt_cloud.py check "$FAKE" 1
+
+      - name: Empty the cache folder so only a restore can refill it
+        run: rm -rf "$RUNNER_TEMP/broom-wagon-cache"
+
+      - id: warm
+        name: Select again with no new runs
+        uses: ./
+        with:
+          account-id: ${{ env.ACCOUNT_ID }}
+          job-id: ${{ env.JOB_ID }}
+          api-token: fake
+          host: localhost:8443
+          manifest-path: tests/action/changed.json
+
+      - name: Check the warm run downloaded nothing
+        run: python3 tests/action/fake_dbt_cloud.py check "$FAKE"
+
+      - name: Add a run that rebuilt only orders, and empty the cache folder
+        run: |
+          mkdir "$FAKE/runs/2"
+          cp tests/action/runs/1/manifest.json "$FAKE/runs/2/"
+          jq '.results |= map(select(.unique_id == "model.shop.orders"))' tests/action/runs/1/run_results.json \
+            > "$FAKE/runs/2/run_results.json"
+          rm -rf "$RUNNER_TEMP/broom-wagon-cache"
+
+      - id: grown
+        name: Select after the new run
+        uses: ./
+        with:
+          account-id: ${{ env.ACCOUNT_ID }}
+          job-id: ${{ env.JOB_ID }}
+          api-token: fake
+          host: localhost:8443
+          manifest-path: tests/action/changed.json
+
+      - name: Check the grown run downloaded only run 2
+        run: python3 tests/action/fake_dbt_cloud.py check "$FAKE" 2
+
+      - name: Check one cache entry was saved per history
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for _ in $(seq 10); do
+            runs=$(gh api "repos/$GITHUB_REPOSITORY/actions/caches?key=broom-wagon-$ACCOUNT_ID-$JOB_ID-" \
+              --jq '[.actions_caches[].key | split("-") | .[-2:] | join("-")] | sort | join(" ")')
+            if [ "$runs" = "1-1 2-1" ]; then break; fi
+            sleep 3
+          done
+          echo "cache entries end in: $runs"
+          if [ "$runs" != "1-1 2-1" ]; then
+            echo "::error::expected one entry ending 1-1 and one ending 2-1, found '$runs'"
+            exit 1
+          fi
+
+      - name: Check outputs
+        env:
+          COLD: ${{ steps.cold.outputs.select }} ${{ steps.cold.outputs.count }}
+          WARM: ${{ steps.warm.outputs.select }} ${{ steps.warm.outputs.count }}
+          GROWN: ${{ steps.grown.outputs.select }} ${{ steps.grown.outputs.count }}
+        run: |
+          status=0
+          for result in "cold=$COLD" "warm=$WARM" "grown=$GROWN"; do
+            if [ "${result#*=}" != "stg_orders+ 3" ]; then
+              echo "::error::${result%%=*} selected '${result#*=}', expected 'stg_orders+ 3'"
+              status=1
+            fi
+          done
+          exit "$status"
