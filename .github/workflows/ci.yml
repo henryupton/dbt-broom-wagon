@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run pytest
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color
+
+  action:
+    name: Action (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: changed
+        name: Select after a model change
+        uses: ./
+        with:
+          source: local
+          runs-dir: tests/action/runs
+          manifest-path: tests/action/changed.json
+
+      - id: unchanged
+        name: Select with nothing changed
+        uses: ./
+        with:
+          source: local
+          runs-dir: tests/action/runs
+          manifest-path: tests/action/runs/1/manifest.json
+
+      - id: no-manifest
+        name: Fail on a missing manifest
+        continue-on-error: true
+        uses: ./
+        with:
+          source: local
+          runs-dir: tests/action/runs
+          manifest-path: tests/action/missing.json
+
+      - id: trigger
+        name: Guarded trigger runs for a selection
+        if: steps.changed.outputs.select != ''
+        env:
+          SELECT: ${{ steps.changed.outputs.select }}
+        run: echo "args=dbt build --select $SELECT" >> "$GITHUB_OUTPUT"
+
+      - name: Guarded trigger skips an empty selection
+        if: steps.unchanged.outputs.select != ''
+        run: |
+          echo "::error::the guarded trigger ran on an empty selection"
+          exit 1
+
+      - name: Check outputs
+        env:
+          CHANGED_SELECT: ${{ steps.changed.outputs.select }}
+          CHANGED_COUNT: ${{ steps.changed.outputs.count }}
+          CHANGED_JSON: ${{ steps.changed.outputs.json-path }}
+          UNCHANGED_SELECT: ${{ steps.unchanged.outputs.select }}
+          UNCHANGED_COUNT: ${{ steps.unchanged.outputs.count }}
+          UNCHANGED_JSON: ${{ steps.unchanged.outputs.json-path }}
+          NO_MANIFEST_OUTCOME: ${{ steps.no-manifest.outcome }}
+          TRIGGER_ARGS: ${{ steps.trigger.outputs.args }}
+        run: |
+          status=0
+          expect() {
+            if [ "$2" != "$3" ]; then
+              echo "::error::$1 is '$2', expected '$3'"
+              status=1
+            fi
+          }
+          expect "changed select" "$CHANGED_SELECT" "stg_orders+"
+          expect "changed count" "$CHANGED_COUNT" "3"
+          expect "changed JSON select" "$(jq -r .select "$CHANGED_JSON")" "stg_orders+"
+          expect "unchanged select" "$UNCHANGED_SELECT" ""
+          expect "unchanged count" "$UNCHANGED_COUNT" "0"
+          expect "unchanged JSON count" "$(jq -r .count "$UNCHANGED_JSON")" "0"
+          expect "missing manifest outcome" "$NO_MANIFEST_OUTCOME" "failure"
+          expect "trigger args" "$TRIGGER_ARGS" "dbt build --select stg_orders+"
+          exit "$status"

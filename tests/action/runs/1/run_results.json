@@ -1,0 +1,11 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/run-results/v6.json"
+  },
+  "args": {"which": "build"},
+  "results": [
+    {"unique_id": "model.shop.stg_orders", "status": "success"},
+    {"unique_id": "model.shop.orders", "status": "success"},
+    {"unique_id": "test.shop.not_null_orders_order_id.5f1c2a9b0e", "status": "pass"}
+  ]
+}
