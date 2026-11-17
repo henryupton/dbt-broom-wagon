@@ -48,12 +48,12 @@ DBT_CLOUD_API_TOKEN=... broom-wagon select \
 | `--format` | `select` | `select`, `selector-yaml` or `json` |
 | `--out` | stdout | Write the output to a file |
 | `--cache-dir` | none | Keep a trimmed copy of each downloaded artifact between invocations |
-| `--github-output` | off | Append `select` and `count` to `$GITHUB_OUTPUT` |
+| `--github-output` | off | Append `select`, `count` and, with `--cache-dir`, `cache-key` to `$GITHUB_OUTPUT` |
 
 - An empty selection prints nothing and exits 0. `dbt build --select ''` builds the whole project, so check the count before you trigger anything.
 - An API, auth or parse failure exits 1.
 - The dbt Cloud token needs read access to the job's runs and artifacts.
-- `--cache-dir` keeps only what `broom-wagon` reads from each artifact, so a 70 MB manifest takes about 5 MB. Each parser version gets its own folder, and `select` deletes the others.
+- `--cache-dir` keeps only what `broom-wagon` reads from each artifact, so a 70 MB manifest takes about 5 MB. Each parser version gets its own folder, and `select` deletes the others. `cache-key` names the parser version and the newest and oldest runs read.
 - `--source local` reads `<runs-dir>/<run id>/manifest.json` and `run_results.json` (or `run_results.1.json`, `run_results.2.json` for several invocations).
 
 ## GitHub Action
@@ -86,7 +86,7 @@ Pass the selection through `env:` and quote the variable. Never put `${{ }}` ins
 | `include-unrun` | `false` |
 | `macro-sensitive` | none (space-separated list) |
 
-Outputs: `select`, `count`, and `json-path` (every selected node with its reason). With `source: dbt-cloud`, the Action caches downloaded artifacts between workflow runs. `source: local` reads saved runs from `runs-dir`, laid out as for `--source local`, and needs no dbt Cloud inputs.
+Outputs: `select`, `count`, and `json-path` (every selected node with its reason). With `source: dbt-cloud`, the Action keeps the cache between workflow runs and saves a new entry only when `cache-key` changes. `source: local` reads saved runs from `runs-dir`, laid out as for `--source local`, and needs no dbt Cloud inputs.
 
 ## Selection rule
 

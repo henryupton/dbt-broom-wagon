@@ -188,3 +188,7 @@ def prune_cache(cache_dir: Path, keep: Iterable[int]) -> None:
         for path in current.iterdir():
             if path.is_dir() and path.name.isdigit() and path.name not in kept:
                 shutil.rmtree(path)
+
+
+def cache_key(run_ids: list[int]) -> str:
+    return f"{CACHE_FORMAT}-{run_ids[0]}-{run_ids[-1]}"

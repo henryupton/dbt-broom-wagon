@@ -13,7 +13,7 @@ from broom_wagon.history import CreditOn, build_history
 from broom_wagon.macros import MacroFoldingSource, fold_macros
 from broom_wagon.select import select
 from broom_wagon.sources import ArtifactSource
-from broom_wagon.sources.dbt_cloud import DbtCloudSource, prune_cache
+from broom_wagon.sources.dbt_cloud import DbtCloudSource, cache_key, prune_cache
 from broom_wagon.sources.local import LocalSource
 
 
@@ -54,7 +54,9 @@ def _source(kind, runs_dir, account_id, job_id, host, api_token, cache_dir) -> A
 )
 @click.option("--format", "fmt", type=click.Choice(FORMATS), default="select", show_default=True)
 @click.option("--out", type=click.Path(path_type=Path, dir_okay=False))
-@click.option("--github-output", is_flag=True, help="Append select and count to $GITHUB_OUTPUT.")
+@click.option(
+    "--github-output", is_flag=True, help="Append select, count and, with --cache-dir, cache-key to $GITHUB_OUTPUT."
+)
 def select_command(
     kind,
     runs_dir,
@@ -88,7 +90,8 @@ def select_command(
     except (BroomWagonError, OSError, ValueError) as exc:
         raise click.ClickException(str(exc)) from exc
 
-    if kind == "dbt-cloud" and cache_dir is not None:
+    caching = kind == "dbt-cloud" and cache_dir is not None
+    if caching:
         prune_cache(cache_dir, history.run_ids)
 
     rendered = render(fmt, selection, target, history)
@@ -105,3 +108,5 @@ def select_command(
     if github_output:
         with open(github_output_path, "a") as fh:
             fh.write(f"select={as_select(selection, target)}\ncount={selection.count}\n")
+            if caching:
+                fh.write(f"cache-key={cache_key(history.run_ids)}\n")

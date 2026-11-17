@@ -52,11 +52,13 @@ runs:
   steps:
     - uses: astral-sh/setup-uv@v6
 
-    - if: inputs.source == 'dbt-cloud'
-      uses: actions/cache@v4
+    # Saved keys end in the CLI's cache-key, so only the prefix in restore-keys can match.
+    - id: restore
+      if: inputs.source == 'dbt-cloud'
+      uses: actions/cache/restore@v4
       with:
         path: ${{ runner.temp }}/broom-wagon-cache/${{ inputs.account-id }}-${{ inputs.job-id }}
-        key: broom-wagon-${{ inputs.account-id }}-${{ inputs.job-id }}-${{ github.run_id }}-${{ github.run_attempt }}
+        key: broom-wagon-${{ inputs.account-id }}-${{ inputs.job-id }}-
         restore-keys: broom-wagon-${{ inputs.account-id }}-${{ inputs.job-id }}-
 
     - id: select
@@ -90,3 +92,12 @@ runs:
         for m in $BW_MACRO_SENSITIVE; do args+=(--macro-sensitive "$m"); done
         uv run --project "$BW_ACTION_PATH" --frozen broom-wagon "${args[@]}"
         echo "json-path=$out" >> "$GITHUB_OUTPUT"
+
+    - if: >-
+        inputs.source == 'dbt-cloud' && steps.select.outputs.cache-key != ''
+        && steps.restore.outputs.cache-matched-key
+        != format('broom-wagon-{0}-{1}-{2}', inputs.account-id, inputs.job-id, steps.select.outputs.cache-key)
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/broom-wagon-cache/${{ inputs.account-id }}-${{ inputs.job-id }}
+        key: broom-wagon-${{ inputs.account-id }}-${{ inputs.job-id }}-${{ steps.select.outputs.cache-key }}
