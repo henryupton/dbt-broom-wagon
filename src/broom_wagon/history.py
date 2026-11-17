@@ -28,6 +28,7 @@ class History:
     reference: Manifest | None
     run_ids: list[int]
     oldest: Manifest | None = None
+    visited: list[int] = field(default_factory=list)
 
 
 def ephemeral_ancestors(manifest: Manifest, uid: str) -> set[str]:
@@ -88,10 +89,12 @@ def build_history(source: ArtifactSource, target: Manifest, *, max_runs: int, cr
     reference: Manifest | None = None
     oldest: Manifest | None = None
     run_ids: list[int] = []
+    visited: list[int] = []
 
     for run in source.recent_runs():
         if not pending or len(run_ids) >= max_runs:
             break
+        visited.append(run.id)
         invocations = source.run_results(run)
         if not invocations:
             continue
@@ -127,4 +130,4 @@ def build_history(source: ArtifactSource, target: Manifest, *, max_runs: int, cr
 
     if pending and run_ids:
         oldest = source.manifest(RunRef(run_ids[-1])) or oldest
-    return History(nodes=nodes, reference=reference, run_ids=run_ids, oldest=oldest)
+    return History(nodes=nodes, reference=reference, run_ids=run_ids, oldest=oldest, visited=visited)

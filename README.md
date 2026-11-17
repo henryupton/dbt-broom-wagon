@@ -53,7 +53,7 @@ DBT_CLOUD_API_TOKEN=... broom-wagon select \
 - An empty selection prints nothing and exits 0. `dbt build --select ''` builds the whole project, so check the count before you trigger anything.
 - An API, auth or parse failure exits 1.
 - The dbt Cloud token needs read access to the job's runs and artifacts.
-- `--cache-dir` keeps only what `broom-wagon` reads from each artifact, so a 70 MB manifest takes about 5 MB. Each parser version gets its own folder, and `select` deletes the others. `cache-key` names the parser version and the newest and oldest runs read.
+- `--cache-dir` keeps only what `broom-wagon` reads from each artifact, so a 70 MB manifest takes about 5 MB. Once dbt Cloud reports a run's artifacts saved, the cache also keeps the run's step list and which steps have no artifacts, so a repeat `select` with no new runs makes one request to dbt Cloud. Each parser version gets its own folder, and `select` deletes the others. `cache-key` names the parser version and the newest and oldest runs `select` visited, including any with no build results.
 - `--source local` reads `<runs-dir>/<run id>/manifest.json` and `run_results.json` (or `run_results.1.json`, `run_results.2.json` for several invocations).
 
 ## GitHub Action

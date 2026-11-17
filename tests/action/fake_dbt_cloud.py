@@ -120,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
                 return 404, NOT_FOUND
             names = [*FIXED_STEPS] + ["Invoke dbt with `dbt build`"] * len(run_results_files(run_dir))
             steps = [{"index": i, "name": name, "status": 10} for i, name in enumerate(names, 1)]
-            return 200, {"data": {"id": int(match[1]), "status": 10, "run_steps": steps}}
+            return 200, {"data": {"id": int(match[1]), "status": 10, "artifacts_saved": True, "run_steps": steps}}
         if RUNS.fullmatch(path):
             ids = sorted((int(p.name) for p in runs.iterdir() if p.is_dir() and p.name.isdigit()), reverse=True)
             offset, limit = int(query["offset"][0]), int(query["limit"][0])

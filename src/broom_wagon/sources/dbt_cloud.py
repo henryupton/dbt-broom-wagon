@@ -62,6 +62,11 @@ class DbtCloudSource:
             headers={"Authorization": f"Token {token}", "Accept": "application/json"}, timeout=300
         )
         self._steps: dict[int, list[int]] = {}
+        self._settled: set[int] = set()
+        self._missing: set[tuple[int, int, str]] = set()
+
+    def _cached(self, run: RunRef, *parts: str) -> Path | None:
+        return self.cache_root.joinpath(str(run.id), *parts) if self.cache_root is not None else None
 
     def _get(self, path: str, params: dict[str, Any] | None = None, *, allow_404: bool = False) -> httpx.Response:
         try:
@@ -107,29 +112,51 @@ class DbtCloudSource:
             offset += self.page_size
 
     def _dbt_steps(self, run: RunRef) -> list[int]:
-        if run.id not in self._steps:
-            path = f"/runs/{run.id}/"
-            data = self._data(self._get(path, {"include_related": '["run_steps"]'}), path)
+        if run.id in self._steps:
+            return self._steps[run.id]
+        cached = self._cached(run, "steps.json")
+        if cached is not None and cached.exists():
             try:
-                self._steps[run.id] = [
-                    step["index"]
-                    for step in data.get("run_steps") or []
-                    if step["status"] in FINISHED and DBT_STEP.match(step["name"])
-                ]
-            except (KeyError, TypeError, AttributeError) as exc:
-                raise BroomWagonError(f"dbt Cloud returned malformed run steps for {path}") from exc
+                self._steps[run.id] = _dbt_step_indexes(json.loads(cached.read_bytes()))
+            except (ValueError, KeyError, TypeError, AttributeError):
+                cached.unlink()
+            else:
+                self._settled.add(run.id)
+                return self._steps[run.id]
+        path = f"/runs/{run.id}/"
+        data = self._data(self._get(path, {"include_related": '["run_steps"]'}), path)
+        try:
+            run_steps = [
+                {"index": step["index"], "name": step["name"], "status": step["status"]}
+                for step in data.get("run_steps") or []
+            ]
+            self._steps[run.id] = _dbt_step_indexes(run_steps)
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise BroomWagonError(f"dbt Cloud returned malformed run steps for {path}") from exc
+        # Once dbt Cloud has saved a finished run's artifacts, its steps and missing artifacts stay as they are.
+        if data.get("status") in FINISHED and data.get("artifacts_saved") is True:
+            self._settled.add(run.id)
+            if cached is not None:
+                _write_atomic(cached, json.dumps(run_steps).encode())
         return self._steps[run.id]
 
     def _artifact[T](self, run: RunRef, step: int, artifact: Artifact[T]) -> T | None:
+        key = (run.id, step, artifact.name)
+        if key in self._missing:
+            return None
         path = f"/runs/{run.id}/artifacts/{artifact.name}?step={step}"
-        cached = self.cache_root / str(run.id) / str(step) / artifact.name if self.cache_root is not None else None
+        cached = self._cached(run, str(step), artifact.name)
         if cached is not None and cached.exists():
             try:
-                return artifact.load(json.loads(cached.read_bytes()))
+                body = json.loads(cached.read_bytes())
+                return None if body is None else artifact.load(body)
             except (ValueError, KeyError, TypeError, AttributeError):
                 cached.unlink()
         response = self._get(f"/runs/{run.id}/artifacts/{artifact.name}", {"step": step}, allow_404=True)
         if response.status_code == 404:
+            self._missing.add(key)
+            if cached is not None and run.id in self._settled:
+                _write_atomic(cached, b"null")
             return None
         try:
             parsed = artifact.parse(json.loads(response.content))
@@ -162,6 +189,10 @@ class DbtCloudSource:
             if parsed is not None:
                 return parsed
         return None
+
+
+def _dbt_step_indexes(run_steps: list[dict[str, Any]]) -> list[int]:
+    return [step["index"] for step in run_steps if step["status"] in FINISHED and DBT_STEP.match(step["name"])]
 
 
 def _write_atomic(path: Path, body: bytes) -> None:

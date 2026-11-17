@@ -92,7 +92,7 @@ def select_command(
 
     caching = kind == "dbt-cloud" and cache_dir is not None
     if caching:
-        prune_cache(cache_dir, history.run_ids)
+        prune_cache(cache_dir, history.visited)
 
     rendered = render(fmt, selection, target, history)
     if out is not None:
@@ -109,4 +109,4 @@ def select_command(
         with open(github_output_path, "a") as fh:
             fh.write(f"select={as_select(selection, target)}\ncount={selection.count}\n")
             if caching:
-                fh.write(f"cache-key={cache_key(history.run_ids)}\n")
+                fh.write(f"cache-key={cache_key(history.visited)}\n")
