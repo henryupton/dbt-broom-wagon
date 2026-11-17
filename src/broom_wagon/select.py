@@ -47,6 +47,8 @@ def _seed_reason(uid: str, target: Manifest, history: History, include_unrun: bo
 
 def select(target: Manifest, history: History, *, include_unrun: bool = False) -> Selection:
     if history.reference is None:
+        if history.run_ids:
+            raise BroomWagonError(f"run {history.run_ids[0]} has build steps but no manifest.json")
         raise BroomWagonError("no runs with build steps found in the history")
 
     buildable = sorted(history.nodes)
