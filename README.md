@@ -19,7 +19,7 @@ Run history has blind spots too. Cancelled and in-progress runs are not read, an
 ## Install
 
 ```bash
-uv tool install git+https://github.com/henryupton/dbt-broom-wagon@v0.3.0
+uv tool install git+https://github.com/henryupton/dbt-broom-wagon@v0.4.0
 ```
 
 Requires Python 3.13 or later.
@@ -61,7 +61,7 @@ DBT_CLOUD_API_TOKEN=... broom-wagon select \
 ```yaml
 - run: dbt parse
 - id: broom-wagon
-  uses: henryupton/dbt-broom-wagon@v0.3.0
+  uses: henryupton/dbt-broom-wagon@v0.4.0
   with:
     account-id: 123
     job-id: 456
